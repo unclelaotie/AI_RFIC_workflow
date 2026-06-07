@@ -8,6 +8,8 @@ Enhanced version supporting:
 3. run_simulation_only: Run EM simulation for specific design
 4. Original complete workflow functions (preserved)
 
+Supports both Windows and Linux platforms with automatic path detection.
+
 Usage: python subprocess_cli_parallel.py --help
 
 Author: ADS Python API Guide
@@ -24,9 +26,13 @@ from pathlib import Path
 import tempfile
 import traceback
 from typing import Dict, List, Any, Optional
+import platform
 
 class EnvironmentManager:
-    """Manage ADS/EMPro environment detection and subprocess calls"""
+    """Manage ADS/EMPro environment detection and subprocess calls
+    
+    Supports both Windows and Linux platforms with platform-specific path detection.
+    """
     
     @staticmethod
     def to_absolute_path(path: str) -> str:
@@ -40,45 +46,86 @@ class EnvironmentManager:
     def __init__(self):
         self.ads_python_exe = None
         self.worker_script = Path(__file__).parent / "subprocess_worker_parallel.py"
+        self.is_windows = sys.platform.startswith('win')
+        self.is_linux = sys.platform.startswith('linux')
         self.detect_environments()
     
     def _build_candidate_paths(self) -> List[str]:
-        """Build ADS Python candidate paths from environment variables and common installs."""
+        """Build ADS Python candidate paths from environment variables and common installs.
+        
+        Supports both Windows and Linux paths based on platform detection.
+        """
         candidates = []
         
+        # Check explicit ADS_PYTHON environment variable first
         env_python = os.environ.get("ADS_PYTHON", "").strip()
         if env_python:
             candidates.append(env_python)
         
+        # Check ADS_INSTALL_DIR and alternative HPEESOF_DIR
         ads_root = os.environ.get("ADS_INSTALL_DIR", "").strip() or os.environ.get("HPEESOF_DIR", "").strip()
         if ads_root:
             base = Path(ads_root)
-            candidates.extend([
-                str(base / "tools" / "python" / "python.exe"),
-                *[str(path) for path in base.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")]
-            ])
+            if self.is_windows:
+                # Windows paths
+                candidates.extend([
+                    str(base / "tools" / "python" / "python.exe"),
+                    *[str(path) for path in base.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")]
+                ])
+            elif self.is_linux:
+                # Linux paths
+                candidates.extend([
+                    str(base / "tools" / "python" / "python3"),
+                    str(base / "tools" / "python" / "python"),
+                    *[str(path) for path in base.glob("tools/python/bin/python*")],
+                ])
         
-        common_roots = []
-        for env_var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
-            value = os.environ.get(env_var, "").strip()
-            if value:
-                common_roots.append(Path(value) / "Keysight")
+        # Platform-specific default search locations
+        if self.is_windows:
+            # Windows common locations
+            common_roots = []
+            for env_var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+                value = os.environ.get(env_var, "").strip()
+                if value:
+                    common_roots.append(Path(value) / "Keysight")
 
-        common_roots.extend([
-            Path(r"C:\Keysight"),
-            Path(r"D:\Keysight"),
-        ])
+            common_roots.extend([
+                Path(r"C:\Keysight"),
+                Path(r"D:\Keysight"),
+            ])
 
-        for root in common_roots:
-            if not root.exists():
-                continue
+            for root in common_roots:
+                if not root.exists():
+                    continue
 
-            for ads_dir in root.glob("ADS*"):
-                candidates.append(str(ads_dir / "tools" / "python" / "python.exe"))
-                candidates.extend(
-                    str(path)
-                    for path in ads_dir.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")
-                )
+                for ads_dir in root.glob("ADS*"):
+                    candidates.append(str(ads_dir / "tools" / "python" / "python.exe"))
+                    candidates.extend(
+                        str(path)
+                        for path in ads_dir.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")
+                    )
+        
+        elif self.is_linux:
+            # Linux common locations
+            common_roots = [
+                Path("/opt/Keysight"),
+                Path("/opt/keysight"),
+                Path("/usr/local/Keysight"),
+                Path("/usr/local/keysight"),
+                Path.home() / ".local/Keysight",
+                Path.home() / ".local/keysight",
+            ]
+            
+            for root in common_roots:
+                if not root.exists():
+                    continue
+                
+                for ads_dir in root.glob("ADS*"):
+                    candidates.extend([
+                        str(ads_dir / "tools" / "python" / "python3"),
+                        str(ads_dir / "tools" / "python" / "python"),
+                        *[str(path) for path in ads_dir.glob("tools/python/bin/python*")],
+                    ])
         
         return candidates
     
@@ -400,10 +447,12 @@ class EMCLI:
     def check_environment(self) -> bool:
         """Check if ADS environment is available"""
         if self.env_manager.is_available():
-            self.logger.info(f"ADS Python found: {Path(self.env_manager.get_python_exe()).parent.parent.parent}")
+            python_path = Path(self.env_manager.get_python_exe())
+            self.logger.info(f"ADS Python found: {python_path}")
             return True
         else:
             self.logger.error("ADS Python environment not found. Please install Keysight ADS 2025.")
+            self.logger.error("Set ADS_PYTHON or ADS_INSTALL_DIR environment variable to specify the path.")
             return False
     
     def load_layer_mapping(self, mapping_file: str) -> Dict[str, Dict[str, str]]:
@@ -605,7 +654,7 @@ class EMCLI:
             # Log export results if available
             export_results = result.get('export_results', {})
             if export_results:
-                self.logger.info(" Exported files:")
+                self.logger.info("Exported files:")
                 for export_type, file_path in export_results.items():
                     if file_path:
                         self.logger.info(f"  - {export_type}: {file_path}")
@@ -720,7 +769,7 @@ class EMCLI:
         # Display results
         export_results = sim_result.get('export_results', {})
         if export_results:
-            self.logger.info(" Exported files:")
+            self.logger.info("Exported files:")
             for export_type, file_path in export_results.items():
                 if file_path:
                     self.logger.info(f"  - {export_type}: {file_path}")
@@ -783,17 +832,21 @@ class EMCLI:
 def create_parser():
     """Create command line argument parser with enhanced options"""
     parser = argparse.ArgumentParser(
-        description="Parallel JSON Layout to EM Simulation CLI",
+        description="Parallel JSON Layout to EM Simulation CLI (supports Windows and Linux)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+Examples (Linux/macOS):
+  # Set environment variables first
+  export ADS_PYTHON=/opt/Keysight/ADS/tools/python/python3
+  export ADS_INSTALL_DIR=/opt/Keysight/ADS
+
   # Create workspace and library only
   python subprocess_cli_parallel.py create-workspace-lib \\
     --workspace-dir "./test_workspace" \\
     --library-name "Test_Lib" \\
     --use-pdk \\
-    --pdk-dir "path/to/pdk" \\
-    --pdk-tech-dir "path/to/tech"
+    --pdk-dir "/home/user/PDK/pdk_2024" \\
+    --pdk-tech-dir "/home/user/PDK/pdk_tech_2024"
 
   # Create design in existing library
   python subprocess_cli_parallel.py create-design-only \\
@@ -802,19 +855,13 @@ Examples:
     --cell-name "Design1" \\
     --json-file "design1.json"
 
-  # Run simulation for specific design
-  python subprocess_cli_parallel.py run-simulation-only \\
-    --workspace-dir "./shared_workspace" \\
-    --library-name "Shared_Lib" \\
-    --cell-name "Design1" \\
-    --export-path "./results"
+Examples (Windows PowerShell):
+  # Set environment variables first
+  $env:ADS_PYTHON = "C:\\Keysight\\ADS\\tools\\python\\python.exe"
+  $env:ADS_INSTALL_DIR = "C:\\Keysight\\ADS"
 
-  # Original complete workflow
-  python subprocess_cli_parallel.py complete-workflow \\
-    --json-file "design.json" \\
-    --workspace-dir "./workspace" \\
-    --library "MyLib" \\
-    --cell "MyDesign"
+  # Or load from .env file
+  Get-Content .env | ForEach-Object { if ($_ -match '=') { Invoke-Expression ("$" + $_) } }
         """
     )
     
