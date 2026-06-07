@@ -5,6 +5,8 @@ Command-line interface for JSON Layout to EM Simulation
 This CLI tool runs in any Python environment and delegates all ADS/EMPro operations
 to subprocess calls using the ADS Python interpreter.
 
+Supports both Windows and Linux platforms with automatic path detection.
+
 Usage: python subprocess_cli.py --help
 
 Author: ADS Python API Guide
@@ -21,52 +23,106 @@ from pathlib import Path
 import tempfile
 import traceback
 from typing import Dict, List, Any, Optional
+import platform
 
 class EnvironmentManager:
-    """Manage ADS/EMPro environment detection and subprocess calls"""
+    """Manage ADS/EMPro environment detection and subprocess calls
+    
+    Supports both Windows and Linux platforms with platform-specific path detection.
+    """
+    
+    @staticmethod
+    def to_absolute_path(path: str) -> str:
+        """Convert path to absolute path if it's not already absolute"""
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return str(path_obj)
+        else:
+            return str(Path.cwd() / path_obj)
     
     def __init__(self):
         self.ads_python_exe = None
         self.worker_script = Path(__file__).parent / "subprocess_worker.py"
+        self.is_windows = sys.platform.startswith('win')
+        self.is_linux = sys.platform.startswith('linux')
         self.detect_environments()
     
     def _build_candidate_paths(self) -> List[str]:
-        """Build ADS Python candidate paths from environment variables and common installs."""
+        """Build ADS Python candidate paths from environment variables and common installs.
+        
+        Supports both Windows and Linux paths based on platform detection.
+        """
         candidates = []
         
+        # Check explicit ADS_PYTHON environment variable first
         env_python = os.environ.get("ADS_PYTHON", "").strip()
         if env_python:
             candidates.append(env_python)
         
+        # Check ADS_INSTALL_DIR and alternative HPEESOF_DIR
         ads_root = os.environ.get("ADS_INSTALL_DIR", "").strip() or os.environ.get("HPEESOF_DIR", "").strip()
         if ads_root:
             base = Path(ads_root)
-            candidates.extend([
-                str(base / "tools" / "python" / "python.exe"),
-                *[str(path) for path in base.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")]
-            ])
+            if self.is_windows:
+                # Windows paths
+                candidates.extend([
+                    str(base / "tools" / "python" / "python.exe"),
+                    *[str(path) for path in base.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")]
+                ])
+            elif self.is_linux:
+                # Linux paths
+                candidates.extend([
+                    str(base / "tools" / "python" / "python3"),
+                    str(base / "tools" / "python" / "python"),
+                    *[str(path) for path in base.glob("tools/python/bin/python*")],
+                ])
         
-        common_roots = []
-        for env_var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
-            value = os.environ.get(env_var, "").strip()
-            if value:
-                common_roots.append(Path(value) / "Keysight")
+        # Platform-specific default search locations
+        if self.is_windows:
+            # Windows common locations
+            common_roots = []
+            for env_var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+                value = os.environ.get(env_var, "").strip()
+                if value:
+                    common_roots.append(Path(value) / "Keysight")
 
-        common_roots.extend([
-            Path(r"C:\Keysight"),
-            Path(r"D:\Keysight"),
-        ])
+            common_roots.extend([
+                Path(r"C:\Keysight"),
+                Path(r"D:\Keysight"),
+            ])
 
-        for root in common_roots:
-            if not root.exists():
-                continue
+            for root in common_roots:
+                if not root.exists():
+                    continue
 
-            for ads_dir in root.glob("ADS*"):
-                candidates.append(str(ads_dir / "tools" / "python" / "python.exe"))
-                candidates.extend(
-                    str(path)
-                    for path in ads_dir.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")
-                )
+                for ads_dir in root.glob("ADS*"):
+                    candidates.append(str(ads_dir / "tools" / "python" / "python.exe"))
+                    candidates.extend(
+                        str(path)
+                        for path in ads_dir.glob("fem/*/win32_64/bin/tools/win32/python/python.exe")
+                    )
+        
+        elif self.is_linux:
+            # Linux common locations
+            common_roots = [
+                Path("/opt/Keysight"),
+                Path("/opt/keysight"),
+                Path("/usr/local/Keysight"),
+                Path("/usr/local/keysight"),
+                Path.home() / ".local/Keysight",
+                Path.home() / ".local/keysight",
+            ]
+            
+            for root in common_roots:
+                if not root.exists():
+                    continue
+                
+                for ads_dir in root.glob("ADS*"):
+                    candidates.extend([
+                        str(ads_dir / "tools" / "python" / "python3"),
+                        str(ads_dir / "tools" / "python" / "python"),
+                        *[str(path) for path in ads_dir.glob("tools/python/bin/python*")],
+                    ])
         
         return candidates
     
@@ -384,10 +440,12 @@ class EMCLI:
     def check_environment(self) -> bool:
         """Check if ADS environment is available"""
         if self.env_manager.is_available():
-            self.logger.info(f"ADS Python found: {Path(self.env_manager.get_python_exe()).parent.parent.parent}")
+            python_path = Path(self.env_manager.get_python_exe())
+            self.logger.info(f"ADS Python found: {python_path}")
             return True
         else:
             self.logger.error("ADS Python environment not found. Please install Keysight ADS 2025.")
+            self.logger.error("Set ADS_PYTHON or ADS_INSTALL_DIR environment variable to specify the path.")
             return False
     
     def load_layer_mapping(self, mapping_file: str) -> Dict[str, Dict[str, str]]:
@@ -611,10 +669,14 @@ class EMCLI:
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser"""
     parser = argparse.ArgumentParser(
-        description="Command-line interface for JSON Layout to EM Simulation",
+        description="Command-line interface for JSON Layout to EM Simulation (supports Windows and Linux)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
+Examples (Linux/macOS):
+  # Set environment variables first
+  export ADS_PYTHON=/opt/Keysight/ADS/tools/python/python3
+  export ADS_INSTALL_DIR=/opt/Keysight/ADS
+
   # Run complete workflow
   python subprocess_cli.py complete --json design.json --workspace ./workspace
   
@@ -626,9 +688,20 @@ Examples:
   
   # Use PDK
   python subprocess_cli.py complete --json design.json --workspace ./workspace --use-pdk --pdk-loc /path/to/pdk
+
+Examples (Windows PowerShell):
+  # Set environment variables first
+  $env:ADS_PYTHON = "C:\\Keysight\\ADS\\tools\\python\\python.exe"
+  $env:ADS_INSTALL_DIR = "C:\\Keysight\\ADS"
+
+  # Or load from .env file
+  Get-Content .env | ForEach-Object { if ($_ -match '=') { Invoke-Expression ("$" + $_) } }
+
+  # Run complete workflow
+  python subprocess_cli.py complete --json design.json --workspace .\\workspace --library EM_Design_Lib
   
   # Export multiple formats
-  python subprocess_cli.py complete --json design.json --workspace ./workspace --export-csv --export-dataset
+  python subprocess_cli.py complete --json design.json --workspace .\\workspace --export-csv --export-dataset
         """
     )
     

@@ -12,6 +12,16 @@ It covers the full chain:
 
 The repository is publishable and the main technical flow has been runtime-validated, but it still reflects a research workflow rather than a polished end-user product.
 
+## Platform Support
+
+The project now supports both **Windows** and **Linux** platforms:
+
+- **Windows**: Original support maintained (PowerShell environment variables)
+- **Linux**: Full support for Keysight ADS on Linux (bash environment variables)
+- **macOS**: Partial support (ADS availability may vary)
+
+📖 **For Linux users, please read [LINUX_SETUP.md](LINUX_SETUP.md) for setup instructions.**
+
 ## License Model
 
 This repository uses a mixed noncommercial license model:
@@ -29,6 +39,11 @@ See:
 
 If you are new to the repository, read these in order:
 
+**Platform Setup (choose one):**
+- **Linux users**: [LINUX_SETUP.md](LINUX_SETUP.md) - Linux setup with environment variables
+- **Windows users**: Continue with the documentation below
+
+**Core Documentation:**
 1. [SETUP.md](docs/core/SETUP.md)
 2. [QUICKSTART.md](docs/core/QUICKSTART.md)
 3. [CONFIG_REFERENCE.md](docs/core/CONFIG_REFERENCE.md)
@@ -50,7 +65,9 @@ AI_RFIC_workflow/
 |- parallel_version/        # recommended public execution line
 |- serial_version/          # legacy/reference implementation
 |- Pytorch_Model/           # CNN training and verification
-`- docs/                    # public documentation
+|- docs/                    # public documentation
+|- LINUX_SETUP.md          # Linux setup guide (NEW)
+`- .env.example            # environment configuration template
 ```
 
 ## Recommended Mainline
@@ -90,29 +107,44 @@ This repository uses two different Python contexts.
 
 ### 1. ADS Automation Host
 
-Use a normal Windows Python interpreter for the outer CLI/orchestration layer.
+Use a normal Python interpreter for the outer CLI/orchestration layer.
 
 - This can be a standard `venv`, Conda environment, or system Python.
 - It does not need `torch` or `scikit-rf`.
 - It launches the ADS-installed Python for ADS-specific work.
 
-Required environment variables:
+**Environment Variables (required):**
 
+Linux:
+```bash
+export ADS_PYTHON=/opt/Keysight/ADS/tools/python/python3
+export ADS_INSTALL_DIR=/opt/Keysight/ADS
+```
+
+Windows (PowerShell):
 ```powershell
-$env:ADS_PYTHON = "C:\Path\To\ADS\tools\python\python.exe"
-$env:ADS_INSTALL_DIR = "C:\Path\To\ADS"
+$env:ADS_PYTHON = "C:\Keysight\ADS\tools\python\python.exe"
+$env:ADS_INSTALL_DIR = "C:\Keysight\ADS"
 ```
 
 You can also start from:
 
-- [`.env.example`](.env.example)
+- [`.env.example`](.env.example) - Copy to `.env` and edit with your paths
 
-Optional but commonly needed:
+**Optional Environment Variables:**
 
+Linux:
+```bash
+export PDK_DIR=/home/user/PDK/pdk_2024
+export PDK_TECH_DIR=/home/user/PDK/pdk_tech_2024
+export SUBSTRATE=microstrip_substrate
+```
+
+Windows (PowerShell):
 ```powershell
-$env:PDK_DIR = "C:\Path\To\PDK"
-$env:PDK_TECH_DIR = "C:\Path\To\PDK_Tech"
-$env:SUBSTRATE = "your_substrate_name"
+$env:PDK_DIR = "C:\PDK\pdk_2024"
+$env:PDK_TECH_DIR = "C:\PDK\pdk_tech_2024"
+$env:SUBSTRATE = "microstrip_substrate"
 ```
 
 ### 2. HDF5 / PyTorch Host
@@ -151,12 +183,14 @@ Validation evidence and compatibility notes:
 
 ## Key Constraints
 
-- end-to-end execution requires Windows, Keysight ADS / RFPro, valid licenses, and an accessible PDK or reference technology library
+- end-to-end execution requires Keysight ADS / RFPro, valid licenses, and an accessible PDK or reference technology library
+- Supported platforms: Windows (primary), Linux (experimental)
 - large HDF5 datasets and model checkpoints are intentionally not tracked by Git
 - a historical 1-channel checkpoint exists only as a local legacy artifact and should not be treated as the canonical current model
 
 ## Additional Documentation
 
+- [Linux Setup Guide](LINUX_SETUP.md) - Setup for Linux systems
 - [Documentation Map](docs/README.md)
 - [Glossary](docs/core/GLOSSARY.md)
 - [Data And Model Assets](docs/reference/DATA_AND_MODEL_ASSETS.md)
